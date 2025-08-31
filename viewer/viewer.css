@@ -22,7 +22,7 @@ html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);}
 
 /* Top loading bar */
 #progress{
-  position:fixed;top:0;left:0;height:3px;width:0;background:var(--progress);
+  position:fixed;top:0;left:0;height:2px;width:0;background:var(--progress);
   display:none;z-index:50;
 }
 #progress.active{display:block;}
@@ -94,7 +94,7 @@ html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);}
 #page-info{ min-width:4.5rem; text-align:center; font:var(--btn-font); }
 
 /* Mobile tweaks: hide +/- (double-tap is the only zoom), slightly smaller UI */
-@media (max-width: 840px){
+@media (max-width: 900px){
   #controls{
     gap:.25rem;
     padding:.2rem .35rem;
