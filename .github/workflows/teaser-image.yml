@@ -4,10 +4,10 @@ on:
   push:
     paths:
       - 'editions/latest.pdf'        # run when latest.pdf changes
-  workflow_dispatch:                 # enables the "Run workflow" button
+  workflow_dispatch:                 # allow manual runs
 
 permissions:
-  contents: write                    # allow the job to commit PNGs back
+  contents: write                    # needed to commit files back
 
 jobs:
   render:
@@ -24,32 +24,51 @@ jobs:
       - name: Render first page to PNG(s)
         run: |
           set -e
-          echo "CWD:" && pwd
-          echo "Tree:" && ls -R
-
           echo "Checking editions/latest.pdf..."
           [ -f editions/latest.pdf ] || { echo "latest.pdf not found"; exit 1; }
           ls -lh editions/latest.pdf
 
-          echo "Rendering 1200px (singlefile)..."
+          echo "Rendering 1200px (singlefile)…"
           pdftoppm -png -singlefile -f 1 -l 1 -scale-to 1200 editions/latest.pdf editions/latest-teaser-1200
-          ls -l editions/latest-teaser-1200.png || { echo "No 1200px PNG produced"; exit 1; }
+          test -f editions/latest-teaser-1200.png
 
-          echo "Rendering 2000px (singlefile)..."
+          echo "Rendering 2000px (singlefile)…"
           pdftoppm -png -singlefile -f 1 -l 1 -scale-to 2000 editions/latest.pdf editions/latest-teaser-2000
-          ls -l editions/latest-teaser-2000.png || { echo "No 2000px PNG produced"; exit 1; }
+          test -f editions/latest-teaser-2000.png
 
-          echo "Optimizing..."
+      - name: Optimise PNGs
+        run: |
+          set -e
           pngquant --force --output editions/latest-teaser-1200.png editions/latest-teaser-1200.png
           pngquant --force --output editions/latest-teaser-2000.png editions/latest-teaser-2000.png
-
           echo "Final files:"
           ls -lh editions/latest-teaser-*.png
 
-      - name: Commit teaser image(s)
+      - name: Build manifest (latest.json)
+        id: manifest
+        run: |
+          set -e
+          VER=$(sha1sum editions/latest-teaser-1200.png | awk '{print $1}' | cut -c1-8)
+          UPDATED=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          cat > editions/latest.json <<EOF
+          {
+            "updated": "${UPDATED}",
+            "version": "${VER}",
+            "alt": "Wellington District Leader — latest issue cover",
+            "teaser": {
+              "1200": "https://softedgesmusic.github.io/wdl-digital-editions/editions/latest-teaser-1200.png?v=${VER}",
+              "2000": "https://softedgesmusic.github.io/wdl-digital-editions/editions/latest-teaser-2000.png?v=${VER}"
+            }
+          }
+          EOF
+          echo "Wrote editions/latest.json:"
+          cat editions/latest.json
+
+      - name: Commit teaser + manifest
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "Auto-generate latest front-page teaser images"
+          commit_message: "Auto-generate latest front-page teaser images + manifest"
           file_pattern: |
             editions/latest-teaser-1200.png
             editions/latest-teaser-2000.png
+            editions/latest.json
