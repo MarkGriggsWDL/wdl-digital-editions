@@ -1,0 +1,74 @@
+name: Build latest teaser image (JPEG)
+
+on:
+  push:
+    paths:
+      - 'editions/latest.pdf'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install poppler (pdftoppm) + jpegoptim
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y poppler-utils jpegoptim
+
+      - name: Render first page to JPEGs
+        run: |
+          set -e
+          echo "Checking editions/latest.pdf..."
+          [ -f editions/latest.pdf ] || { echo "latest.pdf not found"; exit 1; }
+
+          # 1200px wide
+          pdftoppm -jpeg -singlefile -f 1 -l 1 -scale-to 1200 editions/latest.pdf editions/latest-teaser-1200
+          test -f editions/latest-teaser-1200.jpg
+
+          # 2000px wide
+          pdftoppm -jpeg -singlefile -f 1 -l 1 -scale-to 2000 editions/latest.pdf editions/latest-teaser-2000
+          test -f editions/latest-teaser-2000.jpg
+
+      - name: Optimise JPEGs
+        run: |
+          jpegoptim --strip-all --max=85 editions/latest-teaser-1200.jpg
+          jpegoptim --strip-all --max=85 editions/latest-teaser-2000.jpg
+
+      - name: Build manifest (latest.json)
+        run: |
+          set -e
+          OWNER="${GITHUB_REPOSITORY%/*}"
+          REPO="${GITHUB_REPOSITORY#*/}"
+          BASE="https://${OWNER}.github.io/${REPO}"
+
+          VER=$(sha1sum editions/latest-teaser-1200.jpg | awk '{print $1}' | cut -c1-8)
+          UPDATED=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          cat > editions/latest.json <<EOF
+          {
+            "updated": "${UPDATED}",
+            "version": "${VER}",
+            "alt": "Wellington District Leader — latest issue cover",
+            "teaser": {
+              "1200": "${BASE}/editions/latest-teaser-1200.jpg?v=${VER}",
+              "2000": "${BASE}/editions/latest-teaser-2000.jpg?v=${VER}"
+            },
+            "pdf": "${BASE}/editions/latest.pdf"
+          }
+          EOF
+          cat editions/latest.json
+
+      - name: Commit teaser + manifest
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Auto-generate latest front-page teaser JPEGs + manifest"
+          file_pattern: |
+            editions/latest-teaser-1200.jpg
+            editions/latest-teaser-2000.jpg
+            editions/latest.json
