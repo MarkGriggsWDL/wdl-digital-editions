@@ -27,28 +27,29 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y poppler-utils jpegoptim
 
-      - name: Render first page to JPG(s)
+      - name: Render first page to JPG(s) in /tmp
         shell: bash
         run: |
           set -e
-          echo "Checking editions/latest.pdf..."
+          echo "Rendering from editions/latest.pdf…"
           [ -f editions/latest.pdf ] || { echo "latest.pdf not found"; exit 1; }
           ls -lh editions/latest.pdf
 
-          echo "Rendering 1200px (singlefile)…"
-          pdftoppm -jpeg -singlefile -f 1 -l 1 -scale-to 1200 editions/latest.pdf editions/latest-teaser-1200
-          test -f editions/latest-teaser-1200.jpg
+          # Always render to /tmp so we never 'mv' onto itself
+          pdftoppm -jpeg -singlefile -f 1 -l 1 -scale-to 1200 editions/latest.pdf /tmp/latest-teaser-1200
+          test -f /tmp/latest-teaser-1200.jpg
 
-          echo "Rendering 2000px (singlefile)…"
-          pdftoppm -jpeg -singlefile -f 1 -l 1 -scale-to 2000 editions/latest.pdf editions/latest-teaser-2000
-          test -f editions/latest-teaser-2000.jpg
+          pdftoppm -jpeg -singlefile -f 1 -l 1 -scale-to 2000 editions/latest.pdf /tmp/latest-teaser-2000
+          test -f /tmp/latest-teaser-2000.jpg
 
-      - name: Optimise JPGs
-        shell: bash
-        run: |
-          set -e
-          jpegoptim --strip-all --max=82 editions/latest-teaser-1200.jpg
-          jpegoptim --strip-all --max=82 editions/latest-teaser-2000.jpg
+          # Optimise IN PLACE in /tmp
+          jpegoptim --strip-all --max=82 /tmp/latest-teaser-1200.jpg
+          jpegoptim --strip-all --max=82 /tmp/latest-teaser-2000.jpg
+
+          # Move into the repo
+          mv -f /tmp/latest-teaser-1200.jpg editions/latest-teaser-1200.jpg
+          mv -f /tmp/latest-teaser-2000.jpg editions/latest-teaser-2000.jpg
+
           echo "Final files:"
           ls -lh editions/latest-teaser-*.jpg
 
