@@ -19,6 +19,22 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # If you ever move PDFs to Git LFS, set: lfs: true
+
+      - name: Sanity-check latest.pdf
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Checking editions/latest.pdf …"
+          test -f editions/latest.pdf || { echo "latest.pdf missing"; exit 1; }
+          ls -lh editions/latest.pdf
+          SIZE=$(stat -c%s editions/latest.pdf)
+          if [ "${SIZE}" -lt 100000 ]; then
+            echo "latest.pdf too small (${SIZE} bytes) — not a valid PDF. Aborting."; exit 1
+          fi
+          echo "File type: $(file -b editions/latest.pdf)"
 
       - name: Install poppler (pdftoppm) + jpegoptim
         shell: bash
@@ -32,21 +48,16 @@ jobs:
         run: |
           set -e
           echo "Rendering from editions/latest.pdf…"
-          [ -f editions/latest.pdf ] || { echo "latest.pdf not found"; exit 1; }
-          ls -lh editions/latest.pdf
-
-          # Always render to /tmp so we never 'mv' onto itself
+          # Always use /tmp targets to avoid mv-to-self mistakes
           pdftoppm -jpeg -singlefile -f 1 -l 1 -scale-to 1200 editions/latest.pdf /tmp/latest-teaser-1200
           test -f /tmp/latest-teaser-1200.jpg
 
           pdftoppm -jpeg -singlefile -f 1 -l 1 -scale-to 2000 editions/latest.pdf /tmp/latest-teaser-2000
           test -f /tmp/latest-teaser-2000.jpg
 
-          # Optimise IN PLACE in /tmp
           jpegoptim --strip-all --max=82 /tmp/latest-teaser-1200.jpg
           jpegoptim --strip-all --max=82 /tmp/latest-teaser-2000.jpg
 
-          # Move into the repo
           mv -f /tmp/latest-teaser-1200.jpg editions/latest-teaser-1200.jpg
           mv -f /tmp/latest-teaser-2000.jpg editions/latest-teaser-2000.jpg
 
@@ -92,6 +103,5 @@ jobs:
 
           git fetch origin main
           git pull --rebase origin main
-
           git commit -m "Auto-generate latest front-page teaser JPGs + manifest"
           git push origin HEAD:main
