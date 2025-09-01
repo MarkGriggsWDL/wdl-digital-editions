@@ -1,10 +1,10 @@
-name: Build latest teaser image (JPEG)
+name: Build latest teaser image
 
 on:
   push:
     paths:
-      - 'editions/latest.pdf'
-  workflow_dispatch:
+      - 'editions/latest.pdf'        # run whenever latest.pdf changes
+  workflow_dispatch:                 # allow manual runs
 
 permissions:
   contents: write
@@ -21,53 +21,52 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y poppler-utils jpegoptim
 
-      - name: Render first page to JPEGs
+      - name: Render first page to JPG(s)
         run: |
           set -e
           echo "Checking editions/latest.pdf..."
           [ -f editions/latest.pdf ] || { echo "latest.pdf not found"; exit 1; }
+          ls -lh editions/latest.pdf
 
-          # 1200px wide
+          echo "Rendering 1200px (singlefile) JPG…"
           pdftoppm -jpeg -singlefile -f 1 -l 1 -scale-to 1200 editions/latest.pdf editions/latest-teaser-1200
           test -f editions/latest-teaser-1200.jpg
 
-          # 2000px wide
+          echo "Rendering 2000px (singlefile) JPG…"
           pdftoppm -jpeg -singlefile -f 1 -l 1 -scale-to 2000 editions/latest.pdf editions/latest-teaser-2000
           test -f editions/latest-teaser-2000.jpg
 
-      - name: Optimise JPEGs
+      - name: Optimise JPGs
         run: |
-          jpegoptim --strip-all --max=85 editions/latest-teaser-1200.jpg
-          jpegoptim --strip-all --max=85 editions/latest-teaser-2000.jpg
+          set -e
+          jpegoptim --strip-all --max=82 editions/latest-teaser-1200.jpg
+          jpegoptim --strip-all --max=82 editions/latest-teaser-2000.jpg
+          echo "Final files:"
+          ls -lh editions/latest-teaser-*.jpg
 
       - name: Build manifest (latest.json)
         run: |
           set -e
-          OWNER="${GITHUB_REPOSITORY%/*}"
-          REPO="${GITHUB_REPOSITORY#*/}"
-          BASE="https://${OWNER}.github.io/${REPO}"
-
           VER=$(sha1sum editions/latest-teaser-1200.jpg | awk '{print $1}' | cut -c1-8)
           UPDATED=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
           cat > editions/latest.json <<EOF
           {
             "updated": "${UPDATED}",
             "version": "${VER}",
-            "alt": "Wellington District Leader — latest issue cover",
+            "alt": "Wellington & District Leader — latest issue cover",
             "teaser": {
-              "1200": "${BASE}/editions/latest-teaser-1200.jpg?v=${VER}",
-              "2000": "${BASE}/editions/latest-teaser-2000.jpg?v=${VER}"
-            },
-            "pdf": "${BASE}/editions/latest.pdf"
+              "1200": "https://softedgesmusic.github.io/wdl-digital-editions/editions/latest-teaser-1200.jpg?v=${VER}",
+              "2000": "https://softedgesmusic.github.io/wdl-digital-editions/editions/latest-teaser-2000.jpg?v=${VER}"
+            }
           }
           EOF
+          echo "Wrote editions/latest.json:"
           cat editions/latest.json
 
       - name: Commit teaser + manifest
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "Auto-generate latest front-page teaser JPEGs + manifest"
+          commit_message: "Auto-generate latest front-page teaser JPGs + manifest"
           file_pattern: |
             editions/latest-teaser-1200.jpg
             editions/latest-teaser-2000.jpg
