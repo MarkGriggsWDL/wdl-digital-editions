@@ -1,6 +1,11 @@
-name: Build latest teaser image
+name: Build latest teaser images + manifest
 
 on:
+  # Runs automatically when the "Update latest..." workflow finishes successfully
+  workflow_run:
+    workflows: ["Update latest.pdf from new issue"]
+    types: [completed]
+  # Also allow manual runs or when latest.pdf changes directly
   push:
     paths:
       - 'editions/latest.pdf'
@@ -9,58 +14,52 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: editions-pipeline
-  cancel-in-progress: false
-
 jobs:
   render:
+    if: |
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # If you ever move PDFs to Git LFS, set: lfs: true
-
-      - name: Sanity-check latest.pdf
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "Checking editions/latest.pdf …"
-          test -f editions/latest.pdf || { echo "latest.pdf missing"; exit 1; }
-          ls -lh editions/latest.pdf
-          SIZE=$(stat -c%s editions/latest.pdf)
-          if [ "${SIZE}" -lt 100000 ]; then
-            echo "latest.pdf too small (${SIZE} bytes) — not a valid PDF. Aborting."; exit 1
-          fi
-          echo "File type: $(file -b editions/latest.pdf)"
 
       - name: Install poppler (pdftoppm) + jpegoptim
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y poppler-utils jpegoptim
 
-      - name: Render first page to JPG(s) in /tmp
+      - name: Render first page to JPGs
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           echo "Rendering from editions/latest.pdf…"
-          # Always use /tmp targets to avoid mv-to-self mistakes
-          pdftoppm -jpeg -singlefile -f 1 -l 1 -scale-to 1200 editions/latest.pdf /tmp/latest-teaser-1200
-          test -f /tmp/latest-teaser-1200.jpg
+          ls -lh editions/latest.pdf
 
-          pdftoppm -jpeg -singlefile -f 1 -l 1 -scale-to 2000 editions/latest.pdf /tmp/latest-teaser-2000
-          test -f /tmp/latest-teaser-2000.jpg
+          BYTES=$(wc -c < editions/latest.pdf || echo 0)
+          if [ "$BYTES" -lt 1024 ]; then
+            echo "latest.pdf too small ($BYTES bytes) — not a valid PDF. Aborting."
+            exit 1
+          fi
 
-          jpegoptim --strip-all --max=82 /tmp/latest-teaser-1200.jpg
-          jpegoptim --strip-all --max=82 /tmp/latest-teaser-2000.jpg
+          # 1200px wide, first page only
+          pdftoppm -jpeg -singlefile -f 1 -l 1 -scale-to 1200 editions/latest.pdf editions/latest-teaser-1200
+          test -f editions/latest-teaser-1200.jpg
 
-          mv -f /tmp/latest-teaser-1200.jpg editions/latest-teaser-1200.jpg
-          mv -f /tmp/latest-teaser-2000.jpg editions/latest-teaser-2000.jpg
+          # 2000px wide, first page only
+          pdftoppm -jpeg -singlefile -f 1 -l 1 -scale-to 2000 editions/latest.pdf editions/latest-teaser-2000
+          test -f editions/latest-teaser-2000.jpg
 
+      - name: Optimise JPGs
+        shell: bash
+        run: |
+          set -euo pipefail
+          jpegoptim --strip-all --max=85 editions/latest-teaser-1200.jpg || true
+          jpegoptim --strip-all --max=85 editions/latest-teaser-2000.jpg || true
           echo "Final files:"
           ls -lh editions/latest-teaser-*.jpg
 
@@ -68,7 +67,7 @@ jobs:
         id: manifest
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           VER=$(sha1sum editions/latest-teaser-1200.jpg | awk '{print $1}' | cut -c1-8)
           UPDATED=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           cat > editions/latest.json <<EOF
@@ -85,23 +84,26 @@ jobs:
           echo "Wrote editions/latest.json:"
           cat editions/latest.json
 
-      - name: Commit teaser + manifest (rebase-safe)
+      - name: Commit (rebase-safe) and push
         shell: bash
+        env:
+          GH_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
+          GH_NAME:  "github-actions[bot]"
         run: |
-          set -e
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          set -euo pipefail
 
-          git add editions/latest-teaser-1200.jpg \
-                  editions/latest-teaser-2000.jpg \
-                  editions/latest.json
+          git config user.email "$GH_EMAIL"
+          git config user.name  "$GH_NAME"
+
+          git add editions/latest-teaser-1200.jpg editions/latest-teaser-2000.jpg editions/latest.json
 
           if git diff --cached --quiet; then
-            echo "Nothing to commit."
+            echo "No changes to commit."
             exit 0
           fi
 
+          git commit -m "Auto-generate latest front-page teaser JPGs + manifest"
+
           git fetch origin main
           git pull --rebase origin main
-          git commit -m "Auto-generate latest front-page teaser JPGs + manifest"
           git push origin HEAD:main
