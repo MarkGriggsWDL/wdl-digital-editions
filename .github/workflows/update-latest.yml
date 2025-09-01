@@ -3,7 +3,7 @@ name: Update latest.pdf from new issue
 on:
   push:
     paths:
-      - 'editions/WDL*Merged.pdf'
+      - 'editions/WDL*Merged.pdf'   # any new issue
   workflow_dispatch:
 
 permissions:
@@ -16,46 +16,48 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0    # we need history to rebase/push
 
-      - name: Pick newest merged issue and copy to latest.pdf
+      - name: Copy newest merged issue → latest.pdf
         shell: bash
         run: |
           set -euo pipefail
           echo "Looking for editions/WDL*Merged.pdf …"
-          ls -lh editions/WDL*Merged.pdf || { echo "No WDL*Merged.pdf found."; exit 1; }
-
-          NEWEST=$(ls -t editions/WDL*Merged.pdf | head -n1 || true)
-          if [ -z "${NEWEST}" ]; then
-            echo "Could not determine newest merged issue."; exit 1
-          fi
-          echo "Copying: ${NEWEST} -> editions/latest.pdf"
-          cp -f "${NEWEST}" editions/latest.pdf
-
+          ls -lh editions/WDL*Merged.pdf
+          NEWEST=$(ls -t editions/WDL*Merged.pdf | head -n1)
+          echo "Copying: $NEWEST -> editions/latest.pdf"
+          cp "$NEWEST" editions/latest.pdf
           echo "Verifying latest.pdf …"
-          ls -lh editions/latest.pdf || { echo "latest.pdf not found after copy"; exit 1; }
-
-          # Require at least 100KB to avoid accidental empty/truncated file
-          SIZE=$(stat -c%s editions/latest.pdf)
-          if [ "${SIZE}" -lt 100000 ]; then
-            echo "latest.pdf is too small (${SIZE} bytes). Aborting."; exit 1
+          ls -lh editions/latest.pdf
+          BYTES=$(wc -c < editions/latest.pdf || echo 0)
+          if [ "$BYTES" -lt 1024 ]; then
+            echo "latest.pdf too small ($BYTES bytes) — not a valid PDF. Aborting."
+            exit 1
           fi
 
-      - name: Commit updated latest.pdf (rebase-safe)
+      - name: Commit (rebase-safe) and push
         shell: bash
+        env:
+          GH_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
+          GH_NAME:  "github-actions[bot]"
         run: |
-          set -e
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          set -euo pipefail
 
+          git config user.email "$GH_EMAIL"
+          git config user.name  "$GH_NAME"
+
+          # Stage only the file we touched
           git add editions/latest.pdf
 
+          # Commit only if there are changes
           if git diff --cached --quiet; then
-            echo "Nothing to commit."
+            echo "No changes to commit."
             exit 0
           fi
 
+          git commit -m "Update latest.pdf from newest merged issue"
+
+          # Rebase-safe push to main
           git fetch origin main
           git pull --rebase origin main
-          git commit -m "Update latest.pdf from newest merged issue"
           git push origin HEAD:main
