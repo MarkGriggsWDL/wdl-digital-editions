@@ -1,0 +1,30 @@
+name: Update latest.pdf from new issue
+
+on:
+  push:
+    paths:
+      - 'editions/WDL*Merged.pdf'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Copy newest merged issue → latest.pdf
+        run: |
+          set -e
+          NEWEST=$(ls -t editions/WDL*Merged.pdf | head -n1)
+          echo "Copying $NEWEST → editions/latest.pdf"
+          cp "$NEWEST" editions/latest.pdf
+
+      - name: Commit updated latest.pdf
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Update latest.pdf from newest merged issue"
+          file_pattern: editions/latest.pdf
