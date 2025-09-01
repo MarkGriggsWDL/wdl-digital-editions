@@ -1,11 +1,9 @@
 name: Build latest teaser images + manifest
 
 on:
-  # Runs automatically when the "Update latest..." workflow finishes successfully
   workflow_run:
     workflows: ["Update latest.pdf from new issue"]
     types: [completed]
-  # Also allow manual runs or when latest.pdf changes directly
   push:
     paths:
       - 'editions/latest.pdf'
@@ -13,6 +11,11 @@ on:
 
 permissions:
   contents: write
+
+# Ensure only one teaser build at once
+concurrency:
+  group: wdl-build-teaser
+  cancel-in-progress: true
 
 jobs:
   render:
@@ -39,18 +42,15 @@ jobs:
           set -euo pipefail
           echo "Rendering from editions/latest.pdf…"
           ls -lh editions/latest.pdf
-
           BYTES=$(wc -c < editions/latest.pdf || echo 0)
           if [ "$BYTES" -lt 1024 ]; then
             echo "latest.pdf too small ($BYTES bytes) — not a valid PDF. Aborting."
             exit 1
           fi
 
-          # 1200px wide, first page only
           pdftoppm -jpeg -singlefile -f 1 -l 1 -scale-to 1200 editions/latest.pdf editions/latest-teaser-1200
           test -f editions/latest-teaser-1200.jpg
 
-          # 2000px wide, first page only
           pdftoppm -jpeg -singlefile -f 1 -l 1 -scale-to 2000 editions/latest.pdf editions/latest-teaser-2000
           test -f editions/latest-teaser-2000.jpg
 
@@ -84,26 +84,23 @@ jobs:
           echo "Wrote editions/latest.json:"
           cat editions/latest.json
 
-      - name: Commit (rebase-safe) and push
+      - name: Commit (conflict-free) and push atop origin/main
         shell: bash
         env:
           GH_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
           GH_NAME:  "github-actions[bot]"
         run: |
           set -euo pipefail
-
           git config user.email "$GH_EMAIL"
           git config user.name  "$GH_NAME"
 
           git add editions/latest-teaser-1200.jpg editions/latest-teaser-2000.jpg editions/latest.json
-
           if git diff --cached --quiet; then
             echo "No changes to commit."
             exit 0
           fi
 
-          git commit -m "Auto-generate latest front-page teaser JPGs + manifest"
-
           git fetch origin main
-          git pull --rebase origin main
+          git reset --soft origin/main
+          git commit -m "Auto-generate latest front-page teaser JPGs + manifest"
           git push origin HEAD:main
