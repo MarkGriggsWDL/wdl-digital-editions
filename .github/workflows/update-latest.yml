@@ -3,11 +3,16 @@ name: Update latest.pdf from new issue
 on:
   push:
     paths:
-      - 'editions/WDL*Merged.pdf'   # any new issue
+      - 'editions/WDL*Merged.pdf'
   workflow_dispatch:
 
 permissions:
   contents: write
+
+# Ensure only one update-latest run at once
+concurrency:
+  group: wdl-update-latest
+  cancel-in-progress: true
 
 jobs:
   update:
@@ -16,7 +21,7 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0    # we need history to rebase/push
+          fetch-depth: 0
 
       - name: Copy newest merged issue → latest.pdf
         shell: bash
@@ -35,29 +40,25 @@ jobs:
             exit 1
           fi
 
-      - name: Commit (rebase-safe) and push
+      - name: Commit (conflict-free) and push atop origin/main
         shell: bash
         env:
           GH_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
           GH_NAME:  "github-actions[bot]"
         run: |
           set -euo pipefail
-
           git config user.email "$GH_EMAIL"
           git config user.name  "$GH_NAME"
 
-          # Stage only the file we touched
           git add editions/latest.pdf
-
-          # Commit only if there are changes
           if git diff --cached --quiet; then
             echo "No changes to commit."
             exit 0
           fi
 
-          git commit -m "Update latest.pdf from newest merged issue"
-
-          # Rebase-safe push to main
+          # Build commit on top of the latest remote main (no rebase)
           git fetch origin main
-          git pull --rebase origin main
+          git reset --soft origin/main
+          # files are still staged; make the commit
+          git commit -m "Update latest.pdf from newest merged issue"
           git push origin HEAD:main
