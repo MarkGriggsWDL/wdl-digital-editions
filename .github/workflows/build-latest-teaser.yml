@@ -4,7 +4,7 @@ on:
   push:
     paths:
       - 'editions/latest.pdf'
-      - 'editions/latest.source.txt'   # sidecar also triggers build
+      - 'editions/latest.source.txt'   # build even if bytes identical
   workflow_dispatch:
   workflow_run:
     workflows: ["Update latest.pdf from new issue"]
@@ -15,9 +15,10 @@ permissions:
 
 jobs:
   render:
-    # If triggered by workflow_run, only proceed if upstream succeeded
+    # Run always on push/dispatch; only run on workflow_run if upstream succeeded
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -48,7 +49,6 @@ jobs:
       - name: Render first page @ 2000px JPG (single file)
         run: |
           set -euo pipefail
-          echo "Rendering 2000px JPG…"
           pdftoppm -jpeg -singlefile -f 1 -l 1 -scale-to 2000 editions/latest.pdf editions/latest-teaser
           test -f editions/latest-teaser.jpg
           ls -lh editions/latest-teaser.jpg
@@ -57,7 +57,6 @@ jobs:
         run: |
           set -euo pipefail
           jpegoptim --strip-all --max=85 editions/latest-teaser.jpg || true
-          echo "Optimised file:"
           ls -lh editions/latest-teaser.jpg
 
       - name: Build manifest (latest.json)
@@ -73,10 +72,9 @@ jobs:
             "teaser": "https://softedgesmusic.github.io/wdl-digital-editions/editions/latest-teaser.jpg?v=${VER}"
           }
           EOF
-          echo "Wrote editions/latest.json:"
           cat editions/latest.json
 
-      - name: Rebase-safe commit & push teaser + manifest
+      - name: Commit & push teaser + manifest
         run: |
           set -euo pipefail
           git config user.name  "github-actions[bot]"
