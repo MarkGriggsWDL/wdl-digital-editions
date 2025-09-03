@@ -3,13 +3,12 @@ name: Update latest.pdf from new issue
 on:
   push:
     paths:
-      - 'editions/WDL*Merged.pdf'
+      - 'editions/*.pdf'         # any PDF, any name
   workflow_dispatch:
 
 permissions:
   contents: write
 
-# Ensure only one update-latest run at once
 concurrency:
   group: wdl-update-latest
   cancel-in-progress: true
@@ -18,27 +17,41 @@ jobs:
   update:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repo
+      - name: Checkout repo (with LFS)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          lfs: true
 
-      - name: Copy newest merged issue → latest.pdf
+      - name: Copy newest issue → editions/latest.pdf
         shell: bash
         run: |
           set -euo pipefail
-          echo "Looking for editions/WDL*Merged.pdf …"
-          ls -lh editions/WDL*Merged.pdf
-          NEWEST=$(ls -t editions/WDL*Merged.pdf | head -n1)
-          echo "Copying: $NEWEST -> editions/latest.pdf"
-          cp "$NEWEST" editions/latest.pdf
-          echo "Verifying latest.pdf …"
+          shopt -s nullglob
+          echo "Scanning for editions/*.pdf …"
+          files=(editions/*.pdf)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No PDFs under editions/ — nothing to do."
+            exit 0
+          fi
+          # Pick newest by modification time on the runner
+          NEWEST="$(ls -t editions/*.pdf | head -n1)"
+          echo "Newest PDF: ${NEWEST}"
+
+          echo "Copying to editions/latest.pdf …"
+          cp -f "${NEWEST}" editions/latest.pdf
           ls -lh editions/latest.pdf
+
           BYTES=$(wc -c < editions/latest.pdf || echo 0)
-          if [ "$BYTES" -lt 1024 ]; then
-            echo "latest.pdf too small ($BYTES bytes) — not a valid PDF. Aborting."
+          if [ "${BYTES}" -lt 10240 ]; then
+            echo "latest.pdf too small (${BYTES} bytes) — aborting."
             exit 1
           fi
+
+          # Sidecar so we always have a change to commit even if bytes match
+          echo "$(basename "${NEWEST}")" > editions/latest.source.txt
+          echo "Source recorded in editions/latest.source.txt:"
+          cat editions/latest.source.txt
 
       - name: Commit (conflict-free) and push atop origin/main
         shell: bash
@@ -50,15 +63,14 @@ jobs:
           git config user.email "$GH_EMAIL"
           git config user.name  "$GH_NAME"
 
-          git add editions/latest.pdf
+          git add editions/latest.pdf editions/latest.source.txt
+
           if git diff --cached --quiet; then
             echo "No changes to commit."
             exit 0
           fi
 
-          # Build commit on top of the latest remote main (no rebase)
           git fetch origin main
           git reset --soft origin/main
-          # files are still staged; make the commit
-          git commit -m "Update latest.pdf from newest merged issue"
+          git commit -m "Update latest.pdf from $(cat editions/latest.source.txt)"
           git push origin HEAD:main
