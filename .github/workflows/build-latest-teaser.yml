@@ -1,3 +1,4 @@
+# .github/workflows/build-latest-teaser.yml
 name: Build latest teaser (single JPG)
 
 on:
@@ -6,17 +7,24 @@ on:
       - 'editions/latest.pdf'
       - 'editions/latest.source.txt'
   workflow_dispatch:
+  workflow_run:
+    workflows: ["Update latest.pdf from new issue"]
+    types: [completed]
 
 permissions:
   contents: write
 
+# If both push and workflow_run fire, only one run survives
 concurrency:
-  group: wdl-build-teaser-${{ github.sha }}
+  group: wdl-build-teaser-${{ github.event.workflow_run.head_sha || github.sha }}
   cancel-in-progress: true
 
 jobs:
   render:
+    # Only gate workflow_run on success; always run on push/dispatch
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
