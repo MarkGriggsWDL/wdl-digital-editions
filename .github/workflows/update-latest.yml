@@ -9,14 +9,13 @@ on:
 permissions:
   contents: write
 
-# Ensure only one update-latest run at once
 concurrency:
   group: wdl-update-latest
   cancel-in-progress: true
 
 jobs:
   update:
-    # Skip runs triggered by our own bot commits (prevents loops)
+    # avoid loops on our own commits
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
@@ -26,38 +25,77 @@ jobs:
           fetch-depth: 0
           lfs: true
 
-      - name: Copy newest issue → editions/latest.pdf
+      - name: Choose source PDF changed in this push (fallback to newest by git history)
+        id: choose
         shell: bash
         run: |
           set -euo pipefail
 
-          # Find newest PDF EXCLUDING editions/latest.pdf
-          mapfile -t files < <(find editions -maxdepth 1 -type f -name '*.pdf' ! -name 'latest.pdf' -printf '%T@ %p\n' | sort -nr | awk '{print $2}')
+          BEFORE="${{ github.event.before || '' }}"
+          AFTER="${{ github.sha }}"
 
-          if [ ${#files[@]} -eq 0 ]; then
-            echo "No source PDFs found under editions/ (excluding latest.pdf). Nothing to do."
-            exit 0
+          echo "Finding changed PDFs between $BEFORE and $AFTER …"
+          # List PDFs changed in this push, excluding editions/latest.pdf
+          CHANGED=$(git diff --name-only "$BEFORE" "$AFTER" -- 'editions/*.pdf' ':!editions/latest.pdf' || true)
+          echo "Changed PDFs:"
+          echo "$CHANGED"
+
+          SRC=""
+          if [ -n "$CHANGED" ]; then
+            # If multiple changed, choose the one with the most recent commit time
+            latest_ct=0
+            for f in $CHANGED; do
+              ct=$(git log -1 --format=%ct -- "$f" || echo 0)
+              if [ "${ct:-0}" -gt "$latest_ct" ]; then
+                latest_ct="$ct"
+                SRC="$f"
+              fi
+            done
           fi
 
-          NEWEST="${files[0]}"
-          echo "Newest source PDF: ${NEWEST}"
+          if [ -z "$SRC" ]; then
+            echo "No changed PDFs detected in this push; falling back to most recently updated by git history."
+            # Among existing editions/*.pdf (excluding latest.pdf), pick the one with latest commit
+            mapfile -t candidates < <(git ls-files 'editions/*.pdf' ':!editions/latest.pdf')
+            if [ ${#candidates[@]} -eq 0 ]; then
+              echo "No source PDFs found. Nothing to do."
+              exit 0
+            fi
+            latest_ct=0
+            for f in "${candidates[@]}"; do
+              ct=$(git log -1 --format=%ct -- "$f" || echo 0)
+              if [ "${ct:-0}" -gt "$latest_ct" ]; then
+                latest_ct="$ct"
+                SRC="$f"
+              fi
+            done
+          fi
 
-          echo "Copying to editions/latest.pdf …"
-          cp -f "${NEWEST}" editions/latest.pdf
+          echo "Chosen source PDF: $SRC"
+          echo "src=$SRC" >> "$GITHUB_OUTPUT"
+
+      - name: Copy → editions/latest.pdf and write provenance
+        if: steps.choose.outputs.src != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC="${{ steps.choose.outputs.src }}"
+          echo "Copying $SRC → editions/latest.pdf"
+          cp -f "$SRC" editions/latest.pdf
           ls -lh editions/latest.pdf
 
           BYTES=$(wc -c < editions/latest.pdf || echo 0)
-          if [ "${BYTES}" -lt 10240 ]; then
-            echo "latest.pdf too small (${BYTES} bytes) — aborting."
+          if [ "$BYTES" -lt 10240 ]; then
+            echo "latest.pdf too small ($BYTES bytes) — aborting."
             exit 1
           fi
 
-          # Sidecar so a commit happens even if bytes are identical (also records provenance)
-          basename "${NEWEST}" > editions/latest.source.txt
-          echo "Source recorded in editions/latest.source.txt:"
+          basename "$SRC" > editions/latest.source.txt
+          echo "Provenance:"
           cat editions/latest.source.txt
 
       - name: Commit (conflict-free) and push atop origin/main
+        if: steps.choose.outputs.src != ''
         shell: bash
         env:
           GH_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
