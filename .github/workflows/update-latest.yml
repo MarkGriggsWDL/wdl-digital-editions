@@ -3,7 +3,9 @@ name: Update latest.pdf from new issue
 on:
   push:
     paths:
-      - 'editions/*.pdf'         # any PDF, any name
+      - 'editions/*.pdf'          # any PDF…
+    paths-ignore:
+      - 'editions/latest.pdf'     # …but NOT latest.pdf (prevents self-trigger loops)
   workflow_dispatch:
 
 permissions:
@@ -27,16 +29,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          echo "Scanning for editions/*.pdf …"
-          files=(editions/*.pdf)
+
+          # Find newest PDF EXCLUDING editions/latest.pdf
+          # (GNU find on ubuntu supports -printf)
+          mapfile -t files < <(find editions -maxdepth 1 -type f -name '*.pdf' ! -name 'latest.pdf' -printf '%T@ %p\n' | sort -nr | awk '{print $2}')
+
           if [ ${#files[@]} -eq 0 ]; then
-            echo "No PDFs under editions/ — nothing to do."
+            echo "No source PDFs found under editions/ (excluding latest.pdf). Nothing to do."
             exit 0
           fi
-          # Pick newest by modification time on the runner
-          NEWEST="$(ls -t editions/*.pdf | head -n1)"
-          echo "Newest PDF: ${NEWEST}"
+
+          NEWEST="${files[0]}"
+          echo "Newest source PDF: ${NEWEST}"
 
           echo "Copying to editions/latest.pdf …"
           cp -f "${NEWEST}" editions/latest.pdf
@@ -48,8 +52,8 @@ jobs:
             exit 1
           fi
 
-          # Sidecar so we always have a change to commit even if bytes match
-          echo "$(basename "${NEWEST}")" > editions/latest.source.txt
+          # Sidecar to force a commit (and to record provenance)
+          basename "${NEWEST}" > editions/latest.source.txt
           echo "Source recorded in editions/latest.source.txt:"
           cat editions/latest.source.txt
 
