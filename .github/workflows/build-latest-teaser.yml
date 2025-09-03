@@ -4,21 +4,19 @@ on:
   push:
     paths:
       - 'editions/latest.pdf'
-      - 'editions/latest.source.txt'   # build even if bytes identical
+      - 'editions/latest.source.txt'
   workflow_dispatch:
-  workflow_run:
-    workflows: ["Update latest.pdf from new issue"]
-    types: [completed]
 
 permissions:
   contents: write
 
+concurrency:
+  group: wdl-build-teaser-${{ github.sha }}
+  cancel-in-progress: true
+
 jobs:
   render:
-    # Run always on push/dispatch; only run on workflow_run if upstream succeeded
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -28,7 +26,6 @@ jobs:
       - name: Sanity-check latest.pdf
         run: |
           set -euo pipefail
-          echo "Checking editions/latest.pdf …"
           if [ ! -f editions/latest.pdf ]; then
             echo "latest.pdf not present; nothing to do."
             exit 0
