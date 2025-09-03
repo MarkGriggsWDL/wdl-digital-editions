@@ -5,12 +5,17 @@ on:
     paths:
       - 'editions/latest.pdf'          # run whenever latest.pdf changes
   workflow_dispatch:                   # allow manual runs from Actions tab
+  workflow_run:                        # also run whenever the updater completes
+    workflows: ["Update latest.pdf from new issue"]
+    types: [completed]
 
 permissions:
   contents: write
 
 jobs:
   render:
+    # Only run after workflow_run if the updater succeeded; always run on push/dispatch
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
 
     steps:
@@ -27,10 +32,13 @@ jobs:
         run: |
           set -euo pipefail
           echo "Checking editions/latest.pdf …"
-          test -f editions/latest.pdf || { echo "❌ editions/latest.pdf not found"; exit 1; }
+          if [ ! -f editions/latest.pdf ]; then
+            echo "latest.pdf not present; nothing to do."
+            exit 0
+          fi
           ls -lh editions/latest.pdf
           # guard against zero-byte or truncated files
-          BYTES=$(stat -c%s editions/latest.pdf || stat -f%z editions/latest.pdf || echo 0)
+          BYTES=$(stat -c%s editions/latest.pdf 2>/dev/null || stat -f%z editions/latest.pdf 2>/dev/null || echo 0)
           if [ "$BYTES" -lt 10000 ]; then
             echo "❌ latest.pdf too small ($BYTES bytes) — not a valid PDF. Aborting."
             exit 1
