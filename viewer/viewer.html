@@ -41,10 +41,15 @@
 (() => {
   // ---------- CONFIG ----------
   const DEFAULT_PDF = "/wdl-digital-editions/editions/latest.pdf";
+
+  // Adjust these if needed
+  const MOBILE_DOUBLE_TAP_ZOOM = 3;
+  const DESKTOP_DOUBLE_CLICK_ZOOM = 1.8;
+
   const params = new URLSearchParams(location.search);
   const pdfURL = params.get("pdf") || params.get("file") || DEFAULT_PDF;
 
-  // NEW: parse hash for zoom mode
+  // Parse hash for zoom mode
   let startFitMode = null;
   if (location.hash.includes("page-fit")) startFitMode = "page";
   if (location.hash.includes("page-width")) startFitMode = "width";
@@ -73,9 +78,12 @@
 
   // ---------- HELPERS ----------
   const setProgress = (p) => {
-    if (p > 0 && p < 1) progress.classList.add('active'); else progress.classList.remove('active');
+    if (p > 0 && p < 1) progress.classList.add('active');
+    else progress.classList.remove('active');
+
     progress.style.width = (p * 100) + '%';
   };
+
   const box = () => ({ vw: viewer.clientWidth, vh: viewer.clientHeight });
 
   function computeFit(vp1) {
@@ -84,19 +92,25 @@
     const fitWidth = vw / vp1.width;
     const baseWidthZoom = fitWidth / fitWhole;
 
-    // initial modes: allow override from startFitMode
+    // Initial mode
     if (!firstRenderDone) {
       if (startFitMode) {
         fitMode = startFitMode;
       } else {
-        fitMode = isMobile() ? "page" : "width";
+        // Desktop was already width. This now also makes mobile open larger.
+        fitMode = "width";
       }
+
       zoom = (fitMode === "width") ? baseWidthZoom : 1;
     }
 
-    // bounds
+    // Bounds
     minZoom = 1;
-    maxZoom = isMobile() ? Math.max(baseWidthZoom, baseWidthZoom * 2) : Math.max(1, baseWidthZoom);
+
+    maxZoom = isMobile()
+      ? Math.max(baseWidthZoom * MOBILE_DOUBLE_TAP_ZOOM, MOBILE_DOUBLE_TAP_ZOOM)
+      : Math.max(baseWidthZoom * DESKTOP_DOUBLE_CLICK_ZOOM, DESKTOP_DOUBLE_CLICK_ZOOM);
+
     zoom = Math.min(Math.max(zoom, minZoom), maxZoom);
 
     return { fitWhole, baseWidthZoom };
@@ -115,7 +129,11 @@
     let rx = (viewer.scrollLeft + viewer.clientWidth / 2) / Math.max(1, wrap.clientWidth);
     let ry = (viewer.scrollTop  + viewer.clientHeight / 2) / Math.max(1, wrap.clientHeight);
 
-    if (!firstRenderDone || anchor === "top-center") { rx = 0.5; ry = 0.0; }
+    if (!firstRenderDone || anchor === "top-center") {
+      rx = 0.5;
+      ry = 0.0;
+    }
+
     if (anchor && typeof anchor.rx === "number") rx = anchor.rx;
     if (anchor && typeof anchor.ry === "number") ry = anchor.ry;
 
@@ -127,6 +145,7 @@
     const out = DPR;
     canvas.width  = Math.floor(cssW * out);
     canvas.height = Math.floor(cssH * out);
+
     ctx.save();
     ctx.setTransform(1,0,0,1,0,0);
     ctx.fillStyle = "#fff";
@@ -134,14 +153,18 @@
     ctx.restore();
 
     setProgress(0.12);
+
     await page.render({
       canvasContext: ctx,
       transform: out !== 1 ? [out, 0, 0, out, 0, 0] : null,
       viewport: vp
     }).promise;
+
     setProgress(1);
 
-    const newW = wrap.clientWidth, newH = wrap.clientHeight;
+    const newW = wrap.clientWidth;
+    const newH = wrap.clientHeight;
+
     viewer.scrollLeft = Math.max(0, rx * newW - viewer.clientWidth / 2);
     viewer.scrollTop  = Math.max(0, ry * newH - viewer.clientHeight / 2);
 
@@ -151,9 +174,15 @@
 
   async function loadPDF(url) {
     setProgress(0.01);
+
     pdfjsLib.GlobalWorkerOptions.workerSrc = "/wdl-digital-editions/lib/pdfjs/pdf.worker.min.js";
+
     const task = pdfjsLib.getDocument({ url });
-    task.onProgress = e => { if (e && e.total) setProgress(Math.min(0.9, e.loaded / e.total)); };
+
+    task.onProgress = e => {
+      if (e && e.total) setProgress(Math.min(0.9, e.loaded / e.total));
+    };
+
     const doc = await task.promise;
     setProgress(0.98);
     return doc;
@@ -165,15 +194,23 @@
   }
 
   async function zoomTo(newZoom, anchorPx) {
-    const cw = wrap.clientWidth, ch = wrap.clientHeight;
+    const cw = wrap.clientWidth;
+    const ch = wrap.clientHeight;
+
     newZoom = Math.max(minZoom, Math.min(maxZoom, newZoom));
 
     let anchor = null;
+
     if (anchorPx) {
       const cx = viewer.scrollLeft + anchorPx.x;
       const cy = viewer.scrollTop  + anchorPx.y;
-      anchor = { rx: cw ? cx / cw : 0.5, ry: ch ? cy / ch : 0.5 };
+
+      anchor = {
+        rx: cw ? cx / cw : 0.5,
+        ry: ch ? cy / ch : 0.5
+      };
     }
+
     zoom = newZoom;
     await renderPage(current, anchor);
   }
@@ -184,56 +221,127 @@
     const { baseWidthZoom } = computeFit(vp1);
 
     fitMode = (fitMode === "page") ? "width" : "page";
+
     const targetZoom = (fitMode === "width") ? baseWidthZoom : 1;
-    await zoomTo(targetZoom, { x: viewer.clientWidth / 2, y: viewer.clientHeight / 2 });
+
+    await zoomTo(targetZoom, {
+      x: viewer.clientWidth / 2,
+      y: viewer.clientHeight / 2
+    });
   }
 
   // ---------- Controls ----------
-  document.getElementById('prev').onclick      = () => goTo(current - 1);
-  document.getElementById('next').onclick      = () => goTo(current + 1);
-  document.getElementById('zoom-in').onclick   = () => zoomTo(zoom * 1.2, { x: viewer.clientWidth / 2, y: viewer.clientHeight / 2 });
-  document.getElementById('zoom-out').onclick  = () => zoomTo(zoom / 1.2, { x: viewer.clientWidth / 2, y: viewer.clientHeight / 2 });
-  document.getElementById('zoom-toggle').onclick = () => { toggleFitMode(); };
+  document.getElementById('prev').onclick = () => goTo(current - 1);
+  document.getElementById('next').onclick = () => goTo(current + 1);
+
+  document.getElementById('zoom-in').onclick = () => zoomTo(
+    zoom * 1.2,
+    { x: viewer.clientWidth / 2, y: viewer.clientHeight / 2 }
+  );
+
+  document.getElementById('zoom-out').onclick = () => zoomTo(
+    zoom / 1.2,
+    { x: viewer.clientWidth / 2, y: viewer.clientHeight / 2 }
+  );
+
+  document.getElementById('zoom-toggle').onclick = () => {
+    toggleFitMode();
+  };
 
   window.addEventListener('keydown', (e) => {
     if (e.target && /input|textarea|select/i.test(e.target.tagName)) return;
-    if (e.key === 'ArrowLeft')  { e.preventDefault(); goTo(current - 1); }
-    if (e.key === 'ArrowRight') { e.preventDefault(); goTo(current + 1); }
+
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      goTo(current - 1);
+    }
+
+    if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      goTo(current + 1);
+    }
   });
 
   edgePrev.addEventListener('click', () => goTo(current - 1));
   edgeNext.addEventListener('click', () => goTo(current + 1));
 
+  // Mobile double-tap zoom
   let lastTap = 0;
+
   viewer.addEventListener('touchend', (e) => {
     const now = Date.now();
+
     if (e.changedTouches.length === 1 && (now - lastTap) < 300) {
-      const target = (Math.abs(zoom - 1) < 0.05) ? Math.min(2, maxZoom) : 1;
+      const target = (Math.abs(zoom - 1) < 0.05)
+        ? Math.min(MOBILE_DOUBLE_TAP_ZOOM, maxZoom)
+        : 1;
+
       const rect = viewer.getBoundingClientRect();
       const t = e.changedTouches[0];
-      zoomTo(target, { x: t.clientX - rect.left, y: t.clientY - rect.top });
+
+      zoomTo(target, {
+        x: t.clientX - rect.left,
+        y: t.clientY - rect.top
+      });
     }
+
     lastTap = now;
   }, { passive:true });
+
+  // Desktop double-click zoom
+  viewer.addEventListener('dblclick', async (e) => {
+    if (isMobile()) return;
+
+    const page = await pdfDoc.getPage(current);
+    const vp1 = page.getViewport({ scale: 1 });
+    const { baseWidthZoom } = computeFit(vp1);
+
+    const target = zoom <= baseWidthZoom + 0.05
+      ? maxZoom
+      : baseWidthZoom;
+
+    const rect = viewer.getBoundingClientRect();
+
+    zoomTo(target, {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    });
+  });
 
   document.addEventListener('gesturestart', e => e.preventDefault());
 
   viewer.addEventListener('wheel', (e) => {
     if (e.ctrlKey && !isMobile()) {
       e.preventDefault();
+
       const rect = viewer.getBoundingClientRect();
-      const anchor = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+
+      const anchor = {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      };
+
       const factor = e.deltaY < 0 ? 1.12 : 0.9;
+
       zoomTo(zoom * factor, anchor);
     }
   }, { passive:false });
 
-  window.addEventListener('resize', () => { renderPage(current); });
+  window.addEventListener('resize', () => {
+    renderPage(current);
+  });
 
   // ---------- Boot ----------
   loadPDF(pdfURL)
-    .then(doc => { pdfDoc = doc; total = doc.numPages; return renderPage(current, "top-center"); })
-    .catch(err => { console.error("PDF load error", err); progress.classList.remove('active'); });
+    .then(doc => {
+      pdfDoc = doc;
+      total = doc.numPages;
+      return renderPage(current, "top-center");
+    })
+    .catch(err => {
+      console.error("PDF load error", err);
+      progress.classList.remove('active');
+    });
 })();
 </script>
 </body>
